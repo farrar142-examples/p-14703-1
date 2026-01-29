@@ -1,0 +1,76 @@
+x-ollama: &ollama
+  image: ollama/ollama:latest
+  volumes:
+    - ollama-data:/root/.ollama
+    - models-data:/models # converter와 공유
+  ports:
+    - "11434:11434"
+  restart: unless-stopped
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [ gpu ]
+services:
+  # Ollama 서버 (항상 실행)
+  ollama:
+    <<: *ollama
+    profiles:
+      - cpu
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+        reservations:
+          cpus: '1.0'
+
+  ollama-gpu:
+    <<: [ *ollama, *gpu ]
+    profiles:
+      - gpu
+
+  # Huggingface -> Ollama 모델 변환기 (일회성 실행 후 종료)
+  # 사용법: docker compose --profile cpu run --rm model-converter
+  model-converter:
+    build:
+      context: ./model-converter
+      dockerfile: Dockerfile
+    volumes:
+      - ./models-data:/models
+    environment:
+      - OUTPUT_MODEL_NAME=${OUTPUT_MODEL_NAME:-qwen2.5}
+      - AUTO_CONVERT_MODELS=${AUTO_CONVERT_MODELS:-Qwen/Qwen2.5-0.5B-Instruct-GGUF}
+      - QUANTIZATION=${QUANTIZATION:-q4_k_m}
+    profiles:
+      - cpu
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+        reservations:
+          cpus: '2.0'
+          memory: 4G
+    # GPU 버전 변환기
+  model-converter-gpu:
+    build:
+      context: ./model-converter
+      dockerfile: Dockerfile
+    volumes:
+      - ./models-data:/models
+    environment:
+      - OUTPUT_MODEL_NAME=${OUTPUT_MODEL_NAME:-qwen2.5}
+      - AUTO_CONVERT_MODELS=${AUTO_CONVERT_MODELS:-Qwen/Qwen2.5-0.5B-Instruct-GGUF}
+      - QUANTIZATION=${QUANTIZATION:-q4_k_m}
+    profiles:
+      - gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
